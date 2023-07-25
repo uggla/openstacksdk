@@ -16,6 +16,7 @@ from openstack.shared_file_system.v2 import (
     availability_zone as _availability_zone,
 )
 from openstack.shared_file_system.v2 import limit as _limit
+from openstack.shared_file_system.v2 import resource_locks as _resource_locks
 from openstack.shared_file_system.v2 import share as _share
 from openstack.shared_file_system.v2 import share_group as _share_group
 from openstack.shared_file_system.v2 import (
@@ -56,6 +57,7 @@ class Proxy(proxy.Proxy):
         "share_access_rule": _share_access_rule.ShareAccessRule,
         "share_group": _share_group.ShareGroup,
         "share_group_snapshot": _share_group_snapshot.ShareGroupSnapshot,
+        "resource_locks": _resource_locks.ResourceLock,
     }
 
     def availability_zones(self):
@@ -837,7 +839,11 @@ class Proxy(proxy.Proxy):
         :param dict attrs: Attributes which will be used to create
             a :class:`~openstack.shared_file_system.v2.
             share_access_rules.ShareAccessRules`, comprised of the
-            properties on the ShareAccessRules class.
+            properties on the ShareAccessRules class. It is possible to lock
+            the visibility and the deletion of the access rule during the
+            creation, by specifying `restrict_visibility` and
+            `restrict_deletion` attributes in the attrs. A `lock_reason` can
+            also be provided.
         :rtype: :class:`~openstack.shared_file_system.v2.
             share_access_rules.ShareAccessRules`
         """
@@ -846,17 +852,25 @@ class Proxy(proxy.Proxy):
             _share_access_rule.ShareAccessRule, base_path=base_path, **attrs
         )
 
-    def delete_access_rule(self, access_id, share_id, ignore_missing=True):
+    def delete_access_rule(
+        self, access_id, share_id, ignore_missing=True, unrestrict=False
+    ):
         """Deletes an access rule
 
         :param access_id: The id of the access rule to get
         :param share_id: The ID of the share
+        :param unrestrict: If Manila must attempt removing locks while deleting
 
         :rtype: ``requests.models.Response`` HTTP response from internal
             requests client
         """
         res = self._get_resource(_share_access_rule.ShareAccessRule, access_id)
-        res.delete(self, share_id, ignore_missing=ignore_missing)
+        return res.delete(
+            self,
+            share_id,
+            ignore_missing=ignore_missing,
+            unrestrict=unrestrict,
+        )
 
     def share_group_snapshots(self, details=True, **query):
         """Lists all share group snapshots.
@@ -1065,3 +1079,101 @@ class Proxy(proxy.Proxy):
             raise exceptions.SDKException(
                 "Some keys failed to be deleted %s" % keys_failed_to_delete
             )
+
+    def resource_locks(self, **query):
+        """Lists all resource locks.
+
+        :param kwargs query: Optional query parameters to be sent to limit
+            the resource locks being returned.  Available parameters include:
+
+            * project_id: The project ID of the user that the lock is
+                created for.
+            * user_id: The ID of a user to filter resource locks by.
+            * all_projects: list locks from all projects (Admin Only)
+            * resource_id: The ID of the resource that the locks pertain to
+                filter resource locks by.
+            * resource_action: The action prevented by the filtered resource
+                locks.
+            * resource_type: The type of the resource that the locks pertain
+                to filter resource locks by.
+            * lock_context: The lock creator’s context to filter locks by.
+            * lock_reason: The lock reason that can be used to filter resource
+                locks. (Inexact search is also available with lock_reason~)
+            * created_since: Search for the list of resources that were created
+                after the specified date. The date is in ‘yyyy-mm-dd’ format.
+            * created_before: Search for the list of resources that were
+                created prior to the specified date. The date is in
+                ‘yyyy-mm-dd’ format.
+            * limit: The maximum number of resource locks to return.
+            * offset: The offset to define start point of resource lock
+                listing.
+            * sort_key: The key to sort a list of shares.
+            * sort_dir: The direction to sort a list of shares
+            * with_count: Whether to show count in API response or not,
+                default is False. This query parameter is useful with
+                pagination.
+
+        :returns: A generator of manila resource locks
+        :rtype: :class:`~openstack.shared_file_system.v2.
+            resource_locks.ResourceLock`
+        """
+        return self._list(_resource_locks.ResourceLock, **query)
+
+    def get_resource_lock(self, lock_id):
+        """Show details of a resource lock.
+
+        :param lock_id: The id of the lock to get
+        :returns: Details of the identified resource lock.
+        :rtype: :class:`~openstack.shared_file_system.v2.
+            resource_locks.ResourceLock`
+        """
+        return self._get(_resource_locks.ResourceLock, lock_id)
+
+    def update_resource_lock(self, lock_id, **updates):
+        """Updates details of a single resource lock.
+
+        :param lock_id: The ID of the resource lock to update
+        :pram dict attrs: The attributes to update on the resource lock
+        :returns: the updated resource lock
+        :rtype: :class:`~openstack.shared_file_system.v2.
+            resource_locks.ResourceLock`
+        """
+        return self._update(_resource_locks.ResourceLock, lock_id, **updates)
+
+    def delete_resource_lock(self, lock_id, ignore_missing=True):
+        """Deletes a single resource lock
+
+        :param lock_id: The ID of the resource lock to delete
+        :returns: Result of the ``delete``
+        :rtype: ``None``
+        """
+        return self._delete(
+            _resource_locks.ResourceLock,
+            lock_id,
+            ignore_missing=ignore_missing,
+        )
+
+    def create_resource_lock(self, **attrs):
+        """Locks a resource.
+
+        :returns: Details of the lock
+        :param dict attrs: Attributes which will be used to create
+            a :class:`~openstack.shared_file_system.v2.
+            resource_locks.ResourceLock`, comprised of the properties
+            on the ResourceLock class. Available parameters include:
+
+            * ``resource_id``: ID of the resource to be locked.
+            * ``resource_type``: type of the resource (share, access_rule).
+            * ``resource_action``: action to be locked (delete, show).
+            * ``lock_reason``: reason why you're locking the resource
+                (Optional).
+        :rtype: :class:`~openstack.shared_file_system.v2.
+            resource_locks.ResourceLock`
+        """
+
+        if attrs.get('resource_type'):
+            attrs['__conflicting_attrs'] = {
+                'resource_type': attrs.get('resource_type')
+            }
+            attrs.pop('resource_type')
+        return self._create(_resource_locks.ResourceLock, **attrs)
